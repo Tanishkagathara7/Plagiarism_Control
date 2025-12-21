@@ -21,7 +21,11 @@ const HOST = process.env.PORT ? '0.0.0.0' : '127.0.0.1';
 const MONGO_URL = process.env.MONGO_URL;
 const DB_NAME = process.env.DB_NAME;
 const JWT_SECRET = process.env.JWT_SECRET_KEY || 'your-secret-key-change-in-production';
-const CORS_ORIGINS = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['*'];
+const CORS_ORIGINS = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000', 
+  'https://plagiarism-control.vercel.app'
+];
 
 // Initialize Express app
 const app = express();
@@ -34,9 +38,23 @@ app.use(helmet({
 app.use(compression());
 
 // CORS configuration - MUST be before other middleware
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://plagiarism-control.vercel.app'
+];
+
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
   // Set CORS headers for all requests
-  res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    // Allow requests with no origin (like mobile apps or curl)
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
@@ -52,7 +70,16 @@ app.use((req, res, next) => {
 
 // Also use the cors middleware as backup
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'Cache-Control'],
@@ -165,7 +192,19 @@ app.get('/api/health', (req, res) => {
 
 // Handle OPTIONS requests for all API routes
 app.options('/api/*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://plagiarism-control.vercel.app'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control');
