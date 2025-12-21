@@ -172,6 +172,102 @@ app.options('/api/*', (req, res) => {
   res.status(200).end();
 });
 
+// Debug endpoint to check files and test analysis
+app.get('/api/debug/files', authenticateToken, async (req, res) => {
+  try {
+    const files = await db.collection('files').find({}).limit(10).toArray();
+    
+    const fileInfo = [];
+    for (const file of files) {
+      try {
+        const exists = await fs.pathExists(file.file_path);
+        let fileSize = 0;
+        let content = '';
+        
+        if (exists) {
+          const stats = await fs.stat(file.file_path);
+          fileSize = stats.size;
+          
+          // Read a small sample of the file
+          const fileContent = await fs.readFile(file.file_path, 'utf8');
+          content = fileContent.substring(0, 200) + '...';
+        }
+        
+        fileInfo.push({
+          id: file.id,
+          student_name: file.student_name,
+          filename: file.filename,
+          file_path: file.file_path,
+          exists,
+          size: fileSize,
+          sample_content: content
+        });
+      } catch (error) {
+        fileInfo.push({
+          id: file.id,
+          student_name: file.student_name,
+          filename: file.filename,
+          file_path: file.file_path,
+          exists: false,
+          error: error.message
+        });
+      }
+    }
+    
+    res.json({
+      total_files: files.length,
+      files: fileInfo
+    });
+  } catch (error) {
+    console.error('Debug files error:', error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+// Test endpoint for plagiarism detection
+app.post('/api/test-analysis', authenticateToken, async (req, res) => {
+  try {
+    console.log('🧪 Testing plagiarism detection...');
+    
+    // Create test data
+    const testCode1 = `
+def hello_world():
+    print("Hello, World!")
+    return "success"
+
+for i in range(10):
+    print(i)
+`;
+
+    const testCode2 = `
+def hello_world():
+    print("Hello, World!")
+    return "success"
+
+for j in range(10):
+    print(j)
+`;
+
+    const PlagiarismDetector = require('./plagiarism-detector');
+    const detector = new PlagiarismDetector(0.3);
+    
+    const similarity = detector.calculateSimilarity(testCode1, testCode2);
+    
+    res.json({
+      message: 'Test completed',
+      similarity: similarity,
+      similarity_percent: Math.round(similarity * 100 * 100) / 100,
+      test_passed: similarity > 0.5
+    });
+  } catch (error) {
+    console.error('❌ Test analysis error:', error);
+    res.status(500).json({ 
+      detail: `Test failed: ${error.message}`,
+      stack: error.stack
+    });
+  }
+});
+
 // Authentication routes
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -238,6 +334,87 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ detail: 'Internal server error' });
+  }
+});
+
+// Debug endpoint to check files and test analysis
+app.get('/api/debug/files', authenticateToken, async (req, res) => {
+  try {
+    const files = await db.collection('files').find({}).limit(10).toArray();
+    
+    const fileInfo = [];
+    for (const file of files) {
+      try {
+        const exists = await fs.pathExists(file.file_path);
+        let fileSize = 0;
+        let content = '';
+        
+        if (exists) {
+          const stats = await fs.stat(file.file_path);
+          fileSize = stats.size;
+          
+          // Read a small sample of the file
+          const fileContent = await fs.readFile(file.file_path, 'utf8');
+          content = fileContent.substring(0, 200) + '...';
+        }
+        
+        fileInfo.push({
+          id: file.id,
+          student_name: file.student_name,
+          filename: file.filename,
+          file_path: file.file_path,
+          exists,
+          size: fileSize,
+          sample_content: content
+        });
+      } catch (error) {
+        fileInfo.push({
+          id: file.id,
+          student_name: file.student_name,
+          filename: file.filename,
+          file_path: file.file_path,
+          exists: false,
+          error: error.message
+        });
+      }
+    }
+    
+    res.json({
+      total_files: files.length,
+      files: fileInfo
+    });
+  } catch (error) {
+    console.error('Debug files error:', error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+// Debug endpoint to check analysis results
+app.get('/api/debug/results', authenticateToken, async (req, res) => {
+  try {
+    const count = await db.collection('analysis_results').countDocuments();
+    const latest = await db.collection('analysis_results')
+      .findOne({}, { 
+        projection: { _id: 0, id: 1, analysis_timestamp: 1, total_matches: 1, total_files: 1 },
+        sort: { analysis_timestamp: -1 }
+      });
+    
+    const all = await db.collection('analysis_results')
+      .find({}, { 
+        projection: { _id: 0, id: 1, analysis_timestamp: 1, total_matches: 1, total_files: 1 }
+      })
+      .sort({ analysis_timestamp: -1 })
+      .limit(5)
+      .toArray();
+    
+    res.json({
+      total_count: count,
+      latest_result: latest,
+      recent_results: all
+    });
+  } catch (error) {
+    console.error('Debug results error:', error);
+    res.status(500).json({ detail: error.message });
   }
 });
 
@@ -465,7 +642,19 @@ app.delete('/api/files', authenticateToken, async (req, res) => {
 // Analysis routes
 app.post('/api/analyze', authenticateToken, async (req, res) => {
   try {
-    const { threshold = 0.5 } = req.body;
+    let { threshold = 30 } = req.body; // Lower default threshold to 30%
+    
+    // Convert percentage to decimal if needed
+    if (threshold > 1) {
+      threshold = threshold / 100;
+    }
+
+    console.log(`🔍 Starting analysis with threshold: ${threshold} (${threshold * 100}%)`);
+
+    // Validate threshold
+    if (threshold < 0.05 || threshold > 1.0) {
+      return res.status(400).json({ detail: 'Threshold must be between 5% and 100%' });
+    }
 
     const files = await db.collection('files').find({}).limit(300).toArray();
 
@@ -473,53 +662,132 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
       return res.status(400).json({ detail: 'At least 2 files are required for analysis' });
     }
 
-    // Limit files for performance
-    const filesToAnalyze = files.slice(0, 100);
+    console.log(`📁 Found ${files.length} files in database`);
+
+    // Check if files exist and have content
+    let validFiles = 0;
+    for (const file of files) {
+      try {
+        const exists = await fs.pathExists(file.file_path);
+        if (exists) {
+          const stats = await fs.stat(file.file_path);
+          if (stats.size > 0) {
+            validFiles++;
+          } else {
+            console.log(`⚠️ Empty file: ${file.file_path}`);
+          }
+        } else {
+          console.log(`⚠️ File not found: ${file.file_path}`);
+        }
+      } catch (error) {
+        console.log(`❌ Error checking file ${file.file_path}: ${error.message}`);
+      }
+    }
+    
+    console.log(`📊 Valid files: ${validFiles}/${files.length}`);
+
+    // Limit files for performance but allow more than before
+    const filesToAnalyze = files.slice(0, 150); // Increased from 100
 
     const filesData = filesToAnalyze.map(f => ({
       file_id: f.id,
       student_name: f.student_name,
       student_id: f.student_id,
       file_path: f.file_path,
+      filename: f.filename,
       upload_order: f.upload_order
     }));
 
-    // Run plagiarism detection
-    const detector = new PlagiarismDetector(threshold);
-    const results = await detector.detectPlagiarism(filesData);
+    console.log(`🚀 Analyzing ${filesData.length} files...`);
 
-    // Create analysis result
+    // Run plagiarism detection with improved detector
+    const PlagiarismDetector = require('./plagiarism-detector');
+    const detector = new PlagiarismDetector(threshold);
+    
+    console.log('📊 Starting plagiarism detection...');
+    const startTime = Date.now();
+    
+    const results = await detector.detectPlagiarism(filesData);
+    
+    const analysisTime = Date.now() - startTime;
+    console.log(`✅ Analysis completed in ${analysisTime}ms. Found ${results.length} matches`);
+
+    // Log some sample results for debugging
+    if (results.length > 0) {
+      console.log('📋 Sample results:');
+      results.slice(0, 3).forEach((result, index) => {
+        console.log(`  ${index + 1}. ${result.studentA} vs ${result.studentB}: ${result.similarity}%`);
+      });
+    } else {
+      console.log('⚠️ No matches found - this might indicate an issue with the analysis');
+    }
+
+    // Create analysis result with additional metadata
     const analysisResult = {
       id: uuidv4(),
       analysis_timestamp: new Date().toISOString(),
       threshold,
       results,
       total_files: filesToAnalyze.length,
-      total_matches: results.length
+      total_matches: results.length,
+      analysis_duration: analysisTime,
+      statistics: {
+        exact_duplicates: results.filter(r => r.is_exact_duplicate).length,
+        high_similarity: results.filter(r => r.similarity > 80).length,
+        medium_similarity: results.filter(r => r.similarity >= 50 && r.similarity <= 80).length,
+        low_similarity: results.filter(r => r.similarity < 50).length,
+        avg_similarity: results.length > 0 ? results.reduce((sum, r) => sum + r.similarity, 0) / results.length : 0,
+        max_similarity: results.length > 0 ? Math.max(...results.map(r => r.similarity)) : 0
+      }
     };
 
     // Save to database
     await db.collection('analysis_results').insertOne(analysisResult);
 
+    console.log(`💾 Analysis result saved with ID: ${analysisResult.id}`);
+    console.log(`📈 Statistics: ${analysisResult.statistics.exact_duplicates} exact, ${analysisResult.statistics.high_similarity} high, ${analysisResult.statistics.medium_similarity} medium similarity matches`);
+
     res.json(analysisResult);
   } catch (error) {
-    console.error('Analysis error:', error);
-    res.status(500).json({ detail: `Analysis failed: ${error.message}` });
+    console.error('❌ Analysis error:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ 
+      detail: `Analysis failed: ${error.message}`,
+      error_type: error.name,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
 app.get('/api/results/latest', authenticateToken, async (req, res) => {
   try {
+    console.log('🔍 Fetching latest analysis results...');
+    
+    // Use the correct MongoDB syntax for sorting
     const result = await db.collection('analysis_results')
-      .findOne({}, { projection: { _id: 0 } }, { sort: { analysis_timestamp: -1 } });
+      .find({}, { projection: { _id: 0 } })
+      .sort({ analysis_timestamp: -1 })
+      .limit(1)
+      .toArray();
 
-    if (!result) {
-      return res.json({ results: [], total_files: 0, total_matches: 0 });
+    const latestResult = result.length > 0 ? result[0] : null;
+
+    console.log(`📊 Latest result found: ${latestResult ? 'Yes' : 'No'}`);
+    
+    if (!latestResult) {
+      console.log('⚠️ No analysis results found in database');
+      return res.json({ 
+        results: [], 
+        total_files: 0, 
+        total_matches: 0,
+        message: 'No analysis results available'
+      });
     }
 
-    res.json(result);
+    console.log(`✅ Returning analysis ${latestResult.id} with ${latestResult.total_matches} matches from ${latestResult.analysis_timestamp}`);
+    res.json(latestResult);
   } catch (error) {
-    console.error('Get latest result error:', error);
+    console.error('❌ Get latest result error:', error);
     res.status(500).json({ detail: 'Failed to get latest result' });
   }
 });
@@ -581,6 +849,45 @@ app.post('/api/test-extraction', authenticateToken, (req, res) => {
   } catch (error) {
     console.error('Test extraction error:', error);
     res.status(500).json({ detail: 'Test extraction failed' });
+  }
+});
+
+// Compare files endpoint
+app.post('/api/compare', authenticateToken, async (req, res) => {
+  try {
+    const { fileA_id, fileB_id } = req.body;
+
+    if (!fileA_id || !fileB_id) {
+      return res.status(400).json({ detail: 'Both fileA_id and fileB_id are required' });
+    }
+
+    const fileA = await db.collection('files').findOne({ id: fileA_id });
+    const fileB = await db.collection('files').findOne({ id: fileB_id });
+
+    if (!fileA || !fileB) {
+      return res.status(404).json({ detail: 'One or both files not found' });
+    }
+
+    const { NotebookParser } = require('./plagiarism-detector');
+
+    const codeA = await NotebookParser.extractCodeFromNotebook(fileA.file_path);
+    const codeB = await NotebookParser.extractCodeFromNotebook(fileB.file_path);
+
+    res.json({
+      fileA: {
+        student_name: fileA.student_name,
+        student_id: fileA.student_id,
+        code: codeA
+      },
+      fileB: {
+        student_name: fileB.student_name,
+        student_id: fileB.student_id,
+        code: codeB
+      }
+    });
+  } catch (error) {
+    console.error('Compare files error:', error);
+    res.status(500).json({ detail: 'Failed to compare files' });
   }
 });
 
