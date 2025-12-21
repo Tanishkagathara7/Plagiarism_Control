@@ -5,7 +5,7 @@ import { api } from '../App';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Slider } from '../components/ui/slider';
-import { ArrowLeftIcon, FileTextIcon, DownloadIcon, AlertTriangleIcon } from 'lucide-react';
+import { ArrowLeftIcon, FileTextIcon, DownloadIcon } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -98,29 +98,6 @@ function Results() {
     }
   };
 
-  const groupBySimilarCode = () => {
-    const groups = {};
-    
-    filteredResults.forEach((result) => {
-      const key = result.matching_lines[0]?.code || 'unknown';
-      if (!groups[key]) {
-        groups[key] = [];
-      }
-      groups[key].push({
-        studentA: result.studentA,
-        studentB: result.studentB,
-        similarity: result.similarity,
-      });
-    });
-    
-    return Object.entries(groups)
-      .filter(([_, students]) => students.length > 0)
-      .sort((a, b) => b[1].length - a[1].length)
-      .slice(0, 5);
-  };
-
-  const similarCodeGroups = groupBySimilarCode();
-
   return (
     <div className="min-h-screen bg-slate-50" data-testid="results-page">
       <nav className="bg-white border-b border-slate-200 px-6 py-4">
@@ -173,39 +150,6 @@ function Results() {
             <div className="font-mono text-2xl font-semibold text-slate-900">{filterThreshold}%</div>
           </Card>
         </div>
-
-        {similarCodeGroups.length > 0 && (
-          <Card className="p-6 bg-white border border-slate-200 mb-8" data-testid="code-groups-card">
-            <h2 className="font-mono font-medium text-xl text-slate-900 mb-4" data-testid="code-groups-title">
-              Common Code Groups
-            </h2>
-            <p className="font-sans text-sm text-slate-600 mb-6">
-              Students who share similar code blocks
-            </p>
-            <div className="space-y-4">
-              {similarCodeGroups.map(([code, students], index) => (
-                <div key={index} className="p-4 bg-slate-50 border border-slate-200" data-testid={`code-group-${index}`}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <AlertTriangleIcon className="w-5 h-5 text-amber-600" />
-                    <span className="font-mono text-sm font-medium text-slate-900">
-                      {students.length} students with similar code
-                    </span>
-                  </div>
-                  <div className="font-code text-xs bg-white p-3 border border-slate-200 mb-3 overflow-x-auto">
-                    {code.substring(0, 100)}...
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {students.map((s, i) => (
-                      <span key={i} className="font-sans text-xs px-2 py-1 bg-white border border-slate-200 text-slate-700">
-                        {s.studentA} ↔ {s.studentB} ({s.similarity.toFixed(1)}%)
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
 
         <Card className="p-6 bg-white border border-slate-200 mb-8" data-testid="filter-card">
           <div className="flex items-center justify-between mb-4">
