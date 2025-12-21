@@ -726,7 +726,7 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
     console.log(`📊 Valid files: ${validFiles}/${files.length}`);
 
     // Limit files for performance but allow more than before
-    const filesToAnalyze = files.slice(0, 150); // Increased from 100
+    const filesToAnalyze = files.slice(0, 50); // Reduced from 150 to 50 for much faster analysis
 
     const filesData = filesToAnalyze.map(f => ({
       file_id: f.id,

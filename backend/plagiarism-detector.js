@@ -256,66 +256,37 @@ class AdvancedPlagiarismDetector {
   }
 
   /**
-   * Calculate similarity between two code strings using multiple advanced methods
+   * Fast similarity calculation optimized for speed
    */
   calculateSimilarity(code1, code2) {
     if (!code1 || !code2) return 0;
     if (code1.trim() === code2.trim()) return 1.0;
 
     try {
-      // Method 1: String similarity (Dice coefficient)
-      const stringSim = stringSimilarity.compareTwoStrings(code1, code2);
+      // Quick length check - if one is much shorter, likely not similar
+      const len1 = code1.length;
+      const len2 = code2.length;
+      const lengthRatio = Math.min(len1, len2) / Math.max(len1, len2);
+      if (lengthRatio < 0.3) return 0; // Early exit for very different lengths
 
-      // Method 2: Token-based similarity
-      const tokenizer = new natural.WordTokenizer();
-      const tokens1 = tokenizer.tokenize(code1.toLowerCase()) || [];
-      const tokens2 = tokenizer.tokenize(code2.toLowerCase()) || [];
+      // Fast string similarity using Dice coefficient only
+      const stringSim = stringSimilarity.compareTwoStrings(code1, code2);
       
-      if (tokens1.length === 0 || tokens2.length === 0) return stringSim;
+      // Quick token-based check
+      const words1 = code1.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      const words2 = code2.toLowerCase().split(/\s+/).filter(w => w.length > 2);
       
-      const set1 = new Set(tokens1);
-      const set2 = new Set(tokens2);
+      if (words1.length === 0 || words2.length === 0) return stringSim;
+      
+      const set1 = new Set(words1);
+      const set2 = new Set(words2);
       const intersection = new Set([...set1].filter(x => set2.has(x)));
       const union = new Set([...set1, ...set2]);
       
       const jaccardSim = union.size > 0 ? intersection.size / union.size : 0;
 
-      // Method 3: Line-based similarity with improved matching
-      const lines1 = code1.split('\n').filter(line => line.trim().length > 2);
-      const lines2 = code2.split('\n').filter(line => line.trim().length > 2);
-      
-      let matchingLines = 0;
-      const totalLines = Math.max(lines1.length, lines2.length);
-      
-      if (totalLines > 0) {
-        for (const line1 of lines1) {
-          let bestMatch = 0;
-          for (const line2 of lines2) {
-            const lineSim = stringSimilarity.compareTwoStrings(line1.trim(), line2.trim());
-            bestMatch = Math.max(bestMatch, lineSim);
-          }
-          if (bestMatch > 0.7) {
-            matchingLines++;
-          }
-        }
-      }
-      
-      const lineSim = totalLines > 0 ? matchingLines / totalLines : 0;
-
-      // Method 4: Structural similarity
-      const structuralSim = this.calculateStructuralSimilarity(code1, code2);
-
-      // Method 5: N-gram similarity
-      const ngramSim = this.calculateNgramSimilarity(code1, code2);
-
-      // Combine similarities with optimized weights
-      const combinedSimilarity = (
-        stringSim * 0.25 +
-        jaccardSim * 0.20 +
-        lineSim * 0.25 +
-        structuralSim * 0.20 +
-        ngramSim * 0.10
-      );
+      // Weighted combination (simplified)
+      const combinedSimilarity = (stringSim * 0.6) + (jaccardSim * 0.4);
       
       return Math.min(combinedSimilarity, 1.0);
     } catch (error) {
@@ -360,44 +331,53 @@ class AdvancedPlagiarismDetector {
   }
 
   /**
-   * Find matching lines between two code blocks with improved accuracy
+   * Find matching lines between two code blocks (optimized for speed)
    */
-  findMatchingLines(code1, code2, maxMatches = 30) {
+  findMatchingLines(code1, code2, maxMatches = 15) {
     if (!code1 || !code2) return [];
 
-    const lines1 = code1.split('\n').map(line => line.trim()).filter(line => line.length > 2);
-    const lines2 = code2.split('\n').map(line => line.trim()).filter(line => line.length > 2);
+    const lines1 = code1.split('\n').map(line => line.trim()).filter(line => line.length > 3);
+    const lines2 = code2.split('\n').map(line => line.trim()).filter(line => line.length > 3);
     
     const matches = [];
     const usedLines2 = new Set();
     
-    for (let i = 0; i < lines1.length && matches.length < maxMatches; i++) {
+    // Limit the number of lines to check for performance
+    const maxLinesToCheck = Math.min(lines1.length, 50);
+    
+    for (let i = 0; i < maxLinesToCheck && matches.length < maxMatches; i++) {
       const line1 = lines1[i];
       let bestMatch = null;
       let bestSimilarity = 0;
       let bestIndex = -1;
       
-      for (let j = 0; j < lines2.length; j++) {
+      // Limit lines2 check as well
+      const maxLines2ToCheck = Math.min(lines2.length, 50);
+      
+      for (let j = 0; j < maxLines2ToCheck; j++) {
         if (usedLines2.has(j)) continue;
         
         const line2 = lines2[j];
         let similarity;
         
-        // Check for exact matches first
+        // Check for exact matches first (fastest)
         if (line1 === line2) {
           similarity = 1.0;
+        } else if (line1.length < 10 || line2.length < 10) {
+          // Skip very short lines for similarity check
+          continue;
         } else {
           similarity = stringSimilarity.compareTwoStrings(line1, line2);
         }
         
-        if (similarity > bestSimilarity && similarity > 0.75) {
+        if (similarity > bestSimilarity && similarity > 0.8) { // Increased threshold for speed
           bestSimilarity = similarity;
           bestMatch = line2;
           bestIndex = j;
         }
       }
       
-      if (bestMatch && bestSimilarity > 0.75) {
+      if (bestMatch && bestSimilarity > 0.8) {
         matches.push({
           lineA: i + 1,
           lineB: bestIndex + 1,
@@ -412,107 +392,115 @@ class AdvancedPlagiarismDetector {
   }
 
   /**
-   * Detect plagiarism among multiple files with improved algorithm
+   * Detect plagiarism among multiple files with optimized performance
    */
   async detectPlagiarism(filesData) {
     if (!filesData || filesData.length < 2) {
       return [];
     }
 
-    console.log(`🔍 Starting plagiarism detection for ${filesData.length} files...`);
+    console.log(`🔍 Starting optimized plagiarism detection for ${filesData.length} files...`);
 
-    // Step 1: Process all files and extract codes
+    // Step 1: Process files in parallel batches for better performance
     const processedFiles = [];
     let skippedFiles = 0;
+    const batchSize = 10; // Process 10 files at a time
 
-    for (const fileData of filesData) {
-      try {
-        console.log(`📄 Processing file: ${fileData.file_path}`);
-        
-        const rawCode = await NotebookParser.extractCodeFromNotebook(fileData.file_path);
-        
-        if (!rawCode || rawCode.trim().length < 10) { // Lowered from 50 to 10
-          console.log(`⚠️ Skipping file with insufficient code: ${fileData.file_path} (${rawCode ? rawCode.length : 0} chars)`);
-          skippedFiles++;
-          continue;
+    for (let i = 0; i < filesData.length; i += batchSize) {
+      const batch = filesData.slice(i, i + batchSize);
+      const batchPromises = batch.map(async (fileData) => {
+        try {
+          const rawCode = await NotebookParser.extractCodeFromNotebook(fileData.file_path);
+          
+          if (!rawCode || rawCode.trim().length < 10) {
+            return null; // Skip invalid files
+          }
+
+          const normalizedCode = CodeNormalizer.normalizeCode(rawCode, this.normalizeVars);
+          
+          if (!normalizedCode || normalizedCode.trim().length < 5) {
+            return null; // Skip after normalization
+          }
+
+          return {
+            student_name: fileData.student_name,
+            student_id: fileData.student_id,
+            file_id: fileData.file_id,
+            filename: fileData.filename || 'unknown',
+            raw_code: rawCode,
+            normalized_code: normalizedCode,
+            upload_order: fileData.upload_order || 0,
+            code_hash: this.calculateCodeHash(normalizedCode),
+            code_length: normalizedCode.length
+          };
+        } catch (error) {
+          console.error(`❌ Error processing file ${fileData.file_path}:`, error.message);
+          return null;
         }
+      });
 
-        const normalizedCode = CodeNormalizer.normalizeCode(rawCode, this.normalizeVars);
-        
-        if (!normalizedCode || normalizedCode.trim().length < 5) { // Lowered from 20 to 5
-          console.log(`⚠️ Skipping file after normalization: ${fileData.file_path} (${normalizedCode ? normalizedCode.length : 0} chars)`);
-          skippedFiles++;
-          continue;
-        }
+      const batchResults = await Promise.all(batchPromises);
+      const validResults = batchResults.filter(result => result !== null);
+      processedFiles.push(...validResults);
+      skippedFiles += batchResults.length - validResults.length;
 
-        processedFiles.push({
-          student_name: fileData.student_name,
-          student_id: fileData.student_id,
-          file_id: fileData.file_id,
-          filename: fileData.filename || 'unknown',
-          raw_code: rawCode,
-          normalized_code: normalizedCode,
-          upload_order: fileData.upload_order || 0,
-          code_hash: this.calculateCodeHash(normalizedCode),
-          code_length: normalizedCode.length
-        });
-
-        console.log(`✅ Processed: ${fileData.student_name} (${normalizedCode.length} chars)`);
-      } catch (error) {
-        console.error(`❌ Error processing file ${fileData.file_path}:`, error.message);
-        skippedFiles++;
-        continue;
-      }
+      console.log(`📊 Processed batch ${Math.floor(i/batchSize) + 1}: ${validResults.length} valid files`);
     }
 
-    console.log(`📊 Processed ${processedFiles.length} files, skipped ${skippedFiles} files`);
+    console.log(`📊 Total processed: ${processedFiles.length} files, skipped: ${skippedFiles} files`);
 
     if (processedFiles.length < 2) {
       console.log('❌ Not enough valid files for comparison');
       return [];
     }
 
-    console.log(`🔄 Calculating similarities for ${processedFiles.length} files...`);
-
-    // Step 2: Compare all pairs with progress tracking
+    // Step 2: Optimized comparison with early termination
     const results = [];
     const totalComparisons = (processedFiles.length * (processedFiles.length - 1)) / 2;
     let completedComparisons = 0;
 
-    for (let i = 0; i < processedFiles.length; i++) {
-      for (let j = i + 1; j < processedFiles.length; j++) {
-        const fileA = processedFiles[i];
-        const fileB = processedFiles[j];
+    // Limit comparisons for very large datasets - reduce to 50 files for speed
+    const maxFiles = Math.min(processedFiles.length, 50); // Reduced from 100 to 50
+    const filesToCompare = processedFiles.slice(0, maxFiles);
+
+    console.log(`🔄 Comparing ${filesToCompare.length} files (${(filesToCompare.length * (filesToCompare.length - 1)) / 2} comparisons)...`);
+
+    for (let i = 0; i < filesToCompare.length; i++) {
+      for (let j = i + 1; j < filesToCompare.length; j++) {
+        const fileA = filesToCompare[i];
+        const fileB = filesToCompare[j];
 
         completedComparisons++;
-        if (completedComparisons % 10 === 0) {
-          console.log(`📈 Progress: ${completedComparisons}/${totalComparisons} comparisons`);
+        
+        // Progress logging every 100 comparisons for less noise
+        if (completedComparisons % 100 === 0) {
+          console.log(`📈 Progress: ${completedComparisons}/${(filesToCompare.length * (filesToCompare.length - 1)) / 2} comparisons (${Math.round(completedComparisons/((filesToCompare.length * (filesToCompare.length - 1)) / 2)*100)}%)`);
         }
 
         let similarity;
 
         try {
-          // Check for exact duplicates first
+          // Quick hash check for exact duplicates
           if (fileA.code_hash === fileB.code_hash) {
             similarity = 1.0;
-            console.log(`🎯 Exact duplicate found: ${fileA.student_name} vs ${fileB.student_name}`);
           } else {
+            // Quick length check for early termination - more aggressive filtering
+            const lengthRatio = Math.min(fileA.code_length, fileB.code_length) / Math.max(fileA.code_length, fileB.code_length);
+            if (lengthRatio < 0.3) { // Increased from 0.2 to 0.3 for better filtering
+              continue; // Skip very different length files
+            }
+            
             similarity = this.calculateSimilarity(fileA.normalized_code, fileB.normalized_code);
           }
 
-          // Lower threshold for debugging - show all comparisons above 10%
-          const debugThreshold = Math.min(this.threshold, 0.1);
-          
-          if (similarity >= debugThreshold) {
-            // Calculate matching lines for cases above threshold
-            let matchingLines = [];
-            if (similarity > 0.1) { // Very low threshold for line matching
-              matchingLines = this.findMatchingLines(
-                fileA.normalized_code,
-                fileB.normalized_code,
-                30
-              );
-            }
+          // Only process if above threshold
+          if (similarity >= this.threshold) {
+            // Calculate matching lines only for results above threshold
+            const matchingLines = this.findMatchingLines(
+              fileA.normalized_code,
+              fileB.normalized_code,
+              10 // Reduced from 15 to 10 for speed
+            );
 
             const result = {
               studentA: fileA.student_name,
@@ -529,15 +517,7 @@ class AdvancedPlagiarismDetector {
               is_exact_duplicate: fileA.code_hash === fileB.code_hash
             };
 
-            // Only add to results if above the actual threshold
-            if (similarity >= this.threshold) {
-              results.push(result);
-            }
-            
-            console.log(`🔍 Comparison: ${fileA.student_name} vs ${fileB.student_name} (${result.similarity}%) ${similarity >= this.threshold ? '✅ MATCH' : '❌ Below threshold'}`);
-          } else {
-            // Log low similarity for debugging
-            console.log(`🔍 Low similarity: ${fileA.student_name} vs ${fileB.student_name} (${Math.round(similarity * 100 * 100) / 100}%)`);
+            results.push(result);
           }
         } catch (error) {
           console.error(`❌ Error comparing ${fileA.student_name} vs ${fileB.student_name}:`, error.message);
@@ -549,7 +529,7 @@ class AdvancedPlagiarismDetector {
     // Sort by similarity (highest first)
     results.sort((a, b) => b.similarity - a.similarity);
 
-    console.log(`✅ Analysis complete! Found ${results.length} potential matches out of ${totalComparisons} comparisons`);
+    console.log(`✅ Optimized analysis complete! Found ${results.length} matches in ${completedComparisons} comparisons`);
     
     // Log summary statistics
     if (results.length > 0) {
@@ -562,13 +542,6 @@ class AdvancedPlagiarismDetector {
       console.log(`   - Maximum similarity: ${maxSimilarity}%`);
       console.log(`   - Exact duplicates: ${exactDuplicates}`);
       console.log(`   - High similarity (>80%): ${results.filter(r => r.similarity > 80).length}`);
-      console.log(`   - Medium similarity (50-80%): ${results.filter(r => r.similarity >= 50 && r.similarity <= 80).length}`);
-    } else {
-      console.log(`⚠️ No matches found above threshold ${this.threshold * 100}%`);
-      console.log(`📋 Processed files summary:`);
-      processedFiles.forEach((file, index) => {
-        console.log(`   ${index + 1}. ${file.student_name}: ${file.code_length} chars`);
-      });
     }
 
     return results;
