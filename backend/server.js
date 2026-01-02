@@ -307,6 +307,82 @@ for j in range(10):
   }
 });
 
+// Repair file paths endpoint
+app.post('/api/repair-files', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔧 Starting file path repair...');
+    
+    const files = await db.collection('files').find({}).toArray();
+    console.log(`📁 Found ${files.length} files in database`);
+    
+    let fixedCount = 0;
+    let removedCount = 0;
+    let validCount = 0;
+    const issues = [];
+    
+    for (const file of files) {
+      try {
+        const currentPath = file.file_path;
+        const exists = await fs.pathExists(currentPath);
+        
+        if (exists) {
+          // Check if file has content
+          const stats = await fs.stat(currentPath);
+          if (stats.size > 0) {
+            validCount++;
+          } else {
+            console.log(`⚠️ Empty file: ${currentPath}`);
+            await db.collection('files').deleteOne({ id: file.id });
+            removedCount++;
+            issues.push({ file: file.student_name, issue: 'Empty file removed' });
+          }
+        } else {
+          // Try to find the file in uploads directory
+          const filename = path.basename(currentPath);
+          const expectedPath = path.join(UPLOAD_DIR, filename);
+          
+          if (await fs.pathExists(expectedPath)) {
+            // Update the path in database
+            await db.collection('files').updateOne(
+              { id: file.id },
+              { $set: { file_path: expectedPath } }
+            );
+            console.log(`🔧 Fixed path: ${currentPath} → ${expectedPath}`);
+            fixedCount++;
+            issues.push({ file: file.student_name, issue: 'Path fixed' });
+          } else {
+            // File doesn't exist anywhere, remove from database
+            console.log(`❌ File not found, removing: ${currentPath}`);
+            await db.collection('files').deleteOne({ id: file.id });
+            removedCount++;
+            issues.push({ file: file.student_name, issue: 'File not found, removed from database' });
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Error processing ${file.file_path}: ${error.message}`);
+        await db.collection('files').deleteOne({ id: file.id });
+        removedCount++;
+        issues.push({ file: file.student_name, issue: `Error: ${error.message}` });
+      }
+    }
+    
+    res.json({
+      message: 'File repair completed',
+      summary: {
+        valid_files: validCount,
+        fixed_paths: fixedCount,
+        removed_invalid: removedCount,
+        total_remaining: validCount + fixedCount
+      },
+      issues: issues.slice(0, 20) // Return first 20 issues
+    });
+    
+  } catch (error) {
+    console.error('❌ File repair error:', error);
+    res.status(500).json({ detail: `File repair failed: ${error.message}` });
+  }
+});
+
 // Authentication routes
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -703,8 +779,10 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
 
     console.log(`📁 Found ${files.length} files in database`);
 
-    // Check if files exist and have content
+    // Pre-validate files before analysis
     let validFiles = 0;
+    let invalidFiles = [];
+    
     for (const file of files) {
       try {
         const exists = await fs.pathExists(file.file_path);
@@ -714,16 +792,34 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
             validFiles++;
           } else {
             console.log(`⚠️ Empty file: ${file.file_path}`);
+            invalidFiles.push({ path: file.file_path, reason: 'Empty file' });
           }
         } else {
           console.log(`⚠️ File not found: ${file.file_path}`);
+          invalidFiles.push({ path: file.file_path, reason: 'File not found' });
         }
       } catch (error) {
         console.log(`❌ Error checking file ${file.file_path}: ${error.message}`);
+        invalidFiles.push({ path: file.file_path, reason: error.message });
       }
     }
     
     console.log(`📊 Valid files: ${validFiles}/${files.length}`);
+    
+    if (invalidFiles.length > 0) {
+      console.log(`⚠️ Found ${invalidFiles.length} invalid files:`);
+      invalidFiles.slice(0, 5).forEach(f => console.log(`   - ${f.path}: ${f.reason}`));
+      if (invalidFiles.length > 5) {
+        console.log(`   ... and ${invalidFiles.length - 5} more`);
+      }
+    }
+
+    if (validFiles < 2) {
+      return res.status(400).json({ 
+        detail: `Not enough valid files for analysis. Found ${validFiles} valid files, need at least 2.`,
+        invalid_files: invalidFiles.slice(0, 10) // Return first 10 invalid files for debugging
+      });
+    }
 
     // Limit files for performance but allow more than before
     const filesToAnalyze = files.slice(0, 50); // Reduced from 150 to 50 for much faster analysis
@@ -758,7 +854,7 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
         console.log(`  ${index + 1}. ${result.studentA} vs ${result.studentB}: ${result.similarity}%`);
       });
     } else {
-      console.log('⚠️ No matches found - this might indicate an issue with the analysis');
+      console.log('⚠️ No matches found - this might indicate an issue with the analysis or all files are unique');
     }
 
     // Create analysis result with additional metadata
@@ -770,6 +866,8 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
       total_files: filesToAnalyze.length,
       total_matches: results.length,
       analysis_duration: analysisTime,
+      valid_files: validFiles,
+      invalid_files_count: invalidFiles.length,
       statistics: {
         exact_duplicates: results.filter(r => r.is_exact_duplicate).length,
         high_similarity: results.filter(r => r.similarity > 80).length,

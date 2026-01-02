@@ -190,6 +190,14 @@ class AdvancedPlagiarismDetector {
   }
 
   /**
+   * Clear internal caches - call this before each new analysis
+   */
+  clearCaches() {
+    this.codeHashes.clear();
+    console.log('🧹 Cleared internal caches');
+  }
+
+  /**
    * Calculate hash for duplicate detection
    */
   calculateCodeHash(code) {
@@ -401,7 +409,10 @@ class AdvancedPlagiarismDetector {
 
     console.log(`🔍 Starting optimized plagiarism detection for ${filesData.length} files...`);
 
-    // Step 1: Process files in parallel batches for better performance
+    // Clear caches at the start of each analysis
+    this.clearCaches();
+
+    // Step 1: Validate and process files in parallel batches for better performance
     const processedFiles = [];
     let skippedFiles = 0;
     const batchSize = 10; // Process 10 files at a time
@@ -410,16 +421,40 @@ class AdvancedPlagiarismDetector {
       const batch = filesData.slice(i, i + batchSize);
       const batchPromises = batch.map(async (fileData) => {
         try {
+          // First check if file exists
+          if (!await fs.pathExists(fileData.file_path)) {
+            console.error(`❌ File not found: ${fileData.file_path}`);
+            return null;
+          }
+
+          // Check file size
+          const stats = await fs.stat(fileData.file_path);
+          if (stats.size === 0) {
+            console.error(`❌ Empty file: ${fileData.file_path}`);
+            return null;
+          }
+
           const rawCode = await NotebookParser.extractCodeFromNotebook(fileData.file_path);
           
           if (!rawCode || rawCode.trim().length < 10) {
+            console.error(`❌ No valid code extracted from: ${fileData.file_path}`);
             return null; // Skip invalid files
           }
 
           const normalizedCode = CodeNormalizer.normalizeCode(rawCode, this.normalizeVars);
           
           if (!normalizedCode || normalizedCode.trim().length < 5) {
+            console.error(`❌ Code normalization failed for: ${fileData.file_path}`);
             return null; // Skip after normalization
+          }
+
+          const codeHash = this.calculateCodeHash(normalizedCode);
+          
+          // Check for duplicate hashes to avoid processing identical files multiple times
+          if (this.codeHashes.has(codeHash)) {
+            console.log(`⚠️ Duplicate file detected (same hash): ${fileData.file_path}`);
+          } else {
+            this.codeHashes.set(codeHash, fileData.file_path);
           }
 
           return {
@@ -430,7 +465,7 @@ class AdvancedPlagiarismDetector {
             raw_code: rawCode,
             normalized_code: normalizedCode,
             upload_order: fileData.upload_order || 0,
-            code_hash: this.calculateCodeHash(normalizedCode),
+            code_hash: codeHash,
             code_length: normalizedCode.length
           };
         } catch (error) {
@@ -543,6 +578,9 @@ class AdvancedPlagiarismDetector {
       console.log(`   - Exact duplicates: ${exactDuplicates}`);
       console.log(`   - High similarity (>80%): ${results.filter(r => r.similarity > 80).length}`);
     }
+
+    // Clear caches after analysis to free memory
+    this.clearCaches();
 
     return results;
   }
