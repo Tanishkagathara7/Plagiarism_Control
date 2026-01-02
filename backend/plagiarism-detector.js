@@ -494,8 +494,8 @@ class AdvancedPlagiarismDetector {
     const totalComparisons = (processedFiles.length * (processedFiles.length - 1)) / 2;
     let completedComparisons = 0;
 
-    // Limit comparisons for very large datasets - reduce to 50 files for speed
-    const maxFiles = Math.min(processedFiles.length, 50); // Reduced from 100 to 50
+    // Limit comparisons for very large datasets - increased for better coverage
+    const maxFiles = Math.min(processedFiles.length, 200); // Increased to handle up to 200 files
     const filesToCompare = processedFiles.slice(0, maxFiles);
 
     console.log(`🔄 Comparing ${filesToCompare.length} files (${(filesToCompare.length * (filesToCompare.length - 1)) / 2} comparisons)...`);

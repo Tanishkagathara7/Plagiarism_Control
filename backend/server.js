@@ -821,8 +821,9 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
       });
     }
 
-    // Limit files for performance but allow more than before
-    const filesToAnalyze = files.slice(0, 50); // Reduced from 150 to 50 for much faster analysis
+    // Limit files for performance - configurable via environment variable
+    const maxFilesToAnalyze = parseInt(process.env.MAX_FILES_TO_ANALYZE) || 200;
+    const filesToAnalyze = files.slice(0, maxFilesToAnalyze);
 
     const filesData = filesToAnalyze.map(f => ({
       file_id: f.id,
