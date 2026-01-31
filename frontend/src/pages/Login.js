@@ -26,7 +26,7 @@ function Login() {
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('username', response.data.username);
         toast.success('Login successful');
-        navigate('/');
+        navigate('/dashboard');
       } else {
         toast.success('Registration successful. Please login.');
         setIsLogin(true);

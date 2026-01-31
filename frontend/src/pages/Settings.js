@@ -60,7 +60,7 @@ function Settings() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/dashboard')}
             className="text-slate-600 hover:text-slate-900"
           >
             <ArrowLeftIcon className="w-4 h-4 mr-2" />

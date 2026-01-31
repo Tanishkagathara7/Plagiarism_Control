@@ -779,9 +779,10 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
 
     console.log(`📁 Found ${files.length} files in database`);
 
-    // Pre-validate files before analysis
+    // Pre-validate files before analysis and clean up missing files (self-healing)
     let validFiles = 0;
-    let invalidFiles = [];
+    let cleanedFiles = 0;
+    const invalidFiles = [];
     
     for (const file of files) {
       try {
@@ -792,11 +793,17 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
             validFiles++;
           } else {
             console.log(`⚠️ Empty file: ${file.file_path}`);
-            invalidFiles.push({ path: file.file_path, reason: 'Empty file' });
+            // Remove empty file from DB
+            await db.collection('files').deleteOne({ id: file.id });
+            cleanedFiles++;
+            invalidFiles.push({ path: file.file_path, reason: 'Empty file (cleaned up)' });
           }
         } else {
-          console.log(`⚠️ File not found: ${file.file_path}`);
-          invalidFiles.push({ path: file.file_path, reason: 'File not found' });
+          console.log(`⚠️ File not found on disk: ${file.file_path}`);
+          // Remove ghost file from DB
+          await db.collection('files').deleteOne({ id: file.id });
+          cleanedFiles++;
+          invalidFiles.push({ path: file.file_path, reason: 'File missing from server (cleaned up)' });
         }
       } catch (error) {
         console.log(`❌ Error checking file ${file.file_path}: ${error.message}`);
@@ -804,20 +811,18 @@ app.post('/api/analyze', authenticateToken, async (req, res) => {
       }
     }
     
-    console.log(`📊 Valid files: ${validFiles}/${files.length}`);
+    console.log(`📊 Valid files: ${validFiles}, Cleaned: ${cleanedFiles}, Total Scanned: ${files.length}`);
     
-    if (invalidFiles.length > 0) {
-      console.log(`⚠️ Found ${invalidFiles.length} invalid files:`);
-      invalidFiles.slice(0, 5).forEach(f => console.log(`   - ${f.path}: ${f.reason}`));
-      if (invalidFiles.length > 5) {
-        console.log(`   ... and ${invalidFiles.length - 5} more`);
-      }
-    }
-
+    // If we cleaned up files, we might not have enough left
     if (validFiles < 2) {
+      const message = cleanedFiles > 0 
+        ? `Files missing from server. Cleaned ${cleanedFiles} invalid files. Please re-upload at least 2 files.`
+        : `Not enough valid files. Found ${validFiles} valid files, need at least 2.`;
+        
       return res.status(400).json({ 
-        detail: `Not enough valid files for analysis. Found ${validFiles} valid files, need at least 2.`,
-        invalid_files: invalidFiles.slice(0, 10) // Return first 10 invalid files for debugging
+        detail: message,
+        cleaned_up: cleanedFiles > 0,
+        invalid_files: invalidFiles.slice(0, 5) 
       });
     }
 

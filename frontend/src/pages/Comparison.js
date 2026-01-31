@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '../App';
@@ -12,11 +12,7 @@ function Comparison() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    loadComparison();
-  }, [fileAId, fileBId]);
-
-  const loadComparison = async () => {
+  const loadComparison = useCallback(async () => {
     try {
       const response = await api.post('/compare', {
         fileA_id: fileAId,
@@ -28,7 +24,11 @@ function Comparison() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [fileAId, fileBId]);
+
+  useEffect(() => {
+    loadComparison();
+  }, [loadComparison]);
 
   if (loading) {
     return (

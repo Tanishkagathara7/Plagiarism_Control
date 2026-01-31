@@ -68,23 +68,28 @@ function Analysis() {
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
       toast.success(`Analysis completed in ${duration}s`);
-      
+
       setTimeout(() => {
         navigate('/results');
       }, 1000);
     } catch (error) {
       clearInterval(progressInterval);
-      
+
       const errorMessage = error.response?.data?.detail || 'Analysis failed';
-      
-      if (errorMessage.includes('timeout')) {
+      const isCleanedUp = error.response?.data?.cleaned_up;
+
+      if (isCleanedUp || errorMessage.includes('Files missing')) {
+        toast.error('Some files were missing from the server and have been removed. Please upload them again.');
+        // Refresh file list to show they are gone
+        loadFiles();
+      } else if (errorMessage.includes('timeout')) {
         toast.error('Analysis timed out. Try reducing the number of files or threshold.');
-      } else if (errorMessage.includes('At least 2 files')) {
-        toast.error('Please upload at least 2 files before running analysis.');
+      } else if (errorMessage.includes('At least 2 files') || errorMessage.includes('Not enough valid files')) {
+        toast.error('Please upload at least 2 valid files before running analysis.');
       } else {
         toast.error(`Analysis failed: ${errorMessage}`);
       }
-      
+
       setAnalyzing(false);
       setProgress(0);
     }
@@ -98,7 +103,7 @@ function Analysis() {
             Run Analysis
           </h1>
           <Button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/dashboard')}
             variant="ghost"
             className="text-slate-600 hover:text-indigo-900"
             data-testid="back-button"

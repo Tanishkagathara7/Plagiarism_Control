@@ -116,7 +116,7 @@ function Results() {
               Download PDF
             </Button>
             <Button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/dashboard')}
               variant="ghost"
               className="text-slate-600 hover:text-indigo-900"
               data-testid="back-button"
